@@ -1,0 +1,419 @@
+---
+title: "WP3_indoles_inno_niche"
+output: html_document
+date: '2022-12-16'
+---
+
+```{r setup, include=FALSE}
+.libPaths('C:\\Users\\zuendj\\Documents\\R4Libs')
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/zuendj/Desktop/03_data R/wp3", cho = TRUE, warning = FALSE, message = FALSE)
+
+# Install Packages:
+# install.packages("rlang")
+# install.packages("tidyr")
+# install.packages("ggbreak")
+
+
+library(tidyverse)
+library(ggplot2)
+library(tidyr)
+# install.packages("devtools")
+# devtools::install_github("slowkow/ggrepel")
+library(ggrepel)
+library(ggbreak)
+library(openxlsx)
+```
+
+#1. Load the data
+```{r}
+setwd("C:/Users/zuendj/Desktop/03_data R/wp3/input")
+###get the file
+
+files <- list.files(path = "C:/Users/zuendj/Desktop/03_data R/wp3/input")
+
+#########################################
+#load the data
+########################################
+
+#define empty matrices, no values added so far 
+metaboliteswide<- matrix(0, 0 , 10)
+colnames<- c("sample_name", "Tryptophan_absolute","Indolelactate", "Indoleacetate", "Indole", 'Indolepropionate', "Tryptophan", "sample", "Donor", "Substrate")
+colnames(metaboliteswide)  <-colnames
+
+setwd("C:/Users/zuendj/Desktop/03_data R/wp3/input")
+for (l in 1:length(files)) {
+  metaboliteswide_read <- read.csv(files[l], sep=";", header=T, check.names =  F)
+  # print(files[l])
+  metaboliteswide<-rbind(metaboliteswide, metaboliteswide_read)
+  # print(head(metaboliteswide))
+  }
+
+#make NaN values =0? does that make sense? check later!
+metaboliteswide[is.na(metaboliteswide)] = 0
+```
+
+###filter out non-samples
+```{r}
+metaboliteswide%>%
+  subset(sample %in% "yes")%>%
+   subset(substrate %in% c("H2O", 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))->metaboliteswide
+```
+
+##2. Calibration
+### Set data frame with Calibration values
+
+```{r}
+df_calibration <- matrix(0,1,5)
+df_calibration[1,] <-c(0.0261, 0.0251, 0.0294, 0.0265, 0.0279)
+
+
+colnames(df_calibration) <-c("Indolelactate", "Indoleacetate", "Indole", "Indolepropionate", "Tryptophan")
+rownames(df_calibration)<-c("a")
+
+df_calibration
+```
+
+```{r}
+p<-ncol(metaboliteswide)
+indoles <-c("Indolelactate", "Indoleacetate", "Indole", "Indolepropionate", "Tryptophan")
+
+for (i in 1:length(indoles)){
+  
+  x<-paste0(indoles[i], "_mM")
+  col=p+i
+
+metaboliteswide[,col] <- metaboliteswide[,indoles[i]] * df_calibration[1,indoles[i]] *4
+colnames(metaboliteswide)[col]<-x}
+
+df_concentrations <- metaboliteswide[,c(1,9:15)]
+
+write.xlsx(df_concentrations,  "C:/Users/zuendj/Desktop/03_data R/wp3/Inno_niche_indoles.xlsx")
+```
+
+###change to long format
+```{r}
+colnames(df_concentrations)<-c("sample_name","Donor","Substrate", "Indolelactate", "Indoleacetate", "Indole", "Indolepropionate", "Tryptophan")
+concentrations_long <- gather(df_concentrations, metabolite, concentration, "Indolelactate":"Tryptophan", factor_key = T)
+
+```
+
+###set levels of factors
+```{r}
+concentrations_long$metabolite = factor(concentrations_long$metabolite, levels=c("Tryptophan", "Indole" ,  'Indolelactate',  "Indolepropionate", 'Indoleacetate')) 
+
+concentrations_long$Substrate <- as.character(concentrations_long$Substrate)
+
+concentrations_long%>%
+  subset(Substrate %in% c("H2O", 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))-> concentrations_long
+
+concentrations_long$Substrate = factor(concentrations_long$Substrate, levels=c("H2O", 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut')) 
+```
+
+```{r}
+########
+#average calculation
+concentrations_long%>%
+  subset(metabolite != "Tryptophan")->sub
+  
+means <- aggregate(sub$concentration, list(sub$Donor), FUN=mean)
+  
+
+names(means)[1]<-"Donor"
+names(means)[2]<-"mean"
+
+
+order<-as.list(means[order(means$mean, decreasing = T),]$Donor)
+
+
+concentrations_long$Donor = factor(concentrations_long$Donor, levels=c(order))
+```
+
+```{r}
+means <- aggregate(sub$concentration, list(sub$Donor, sub$Substrate), FUN=sum)
+  
+
+names(means)[1]<-"Donor"
+names(means)[2]<-"Substrate"
+names(means)[3]<-"sum"
+
+
+
+concentrations_long%>%
+  subset(metabolite == "Tryptophan")->sub_Trp
+
+colnames(sub_Trp)[5]<-"conc_Trp"
+
+
+df_sums<-join(means, sub_Trp)
+
+```
+
+
+```{r}
+df_sums %>%
+  ggplot(aes(x=conc_Trp, y=sum))+
+  geom_point(aes(colour=Substrate, shape=Donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10, 11, 12, 13, 14, 15, 16))+
+  scale_colour_manual(values=c("#F8766D", "#E68613", "#CD9600", "#ABA300", "#00C19A","#8494FF", "#00B8E7" ,"#C77Cff","#00BFC4" ,"#018571", "black", "grey"),labels= c(expression(H[2]*O), 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))+
+  # facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq(use_label(c("eq", "R2")),size=6)+
+  theme(strip.placement = "outside",
+        strip.text.y = element_text( size=15),
+        strip.text.x = element_text( size=15),
+        # strip.background = element_blank(),
+        axis.text.x = element_text(size=15),
+        axis.title.x = element_text(size=20), 
+        plot.title = element_text(size=20),
+        axis.text.y= element_text(size = 15),
+        axis.title.y= element_text(size = 20),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size=20))+
+  ggtitle("Total Indoles production vs. Trp consumption")+
+  ylab("ΔTotal Indoles [mM]")+xlab("ΔTrp [mM]")+
+ scale_x_reverse( limits=c(0, -4))+scale_y_continuous(limits=c(0,4))
+
+ggsave(filename = "production_vs_consumption.jpeg", path = "C:/Users/zuendj/Desktop/03_data R/wp3/output", 
+       width = 20,
+       height = 17,
+       units = c("cm"))
+```
+
+
+
+##3. Plot
+##for the individual donors
+```{r}
+
+
+concentrations_long %>%
+  ggplot(aes(x= Donor, y=concentration)) +
+  geom_col(width = 1, position = position_dodge(1), aes(fill = Substrate))+
+  scale_fill_manual(values=c("#F8766D", "#E68613", "#CD9600", "#ABA300", "#00C19A","#8494FF", "#00B8E7" ,"#C77Cff","#00BFC4" ,"#018571", "black", "grey"),
+  labels= c(expression(H[2]*O), 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))+
+  #stat_summary(fun = mean, geom = "bar", position = position_dodge(1), aes(fill = Donor)) +
+  #scale_fill_manual(values=c('darkgoldenrod1', "cyan4"))+
+  facet_grid(rows=vars(metabolite), col=vars(Donor), scales = "free", space = "free_x")+
+  theme(strip.placement = "outside",
+        strip.text.y = element_text( size=15),
+        strip.text.x = element_text( size=15),
+        # strip.background = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(), 
+        legend.position="bottom",
+        plot.title = element_text(size=20),
+        axis.text.y= element_text(size = 15),
+        axis.title.y= element_text(size = 20),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size=20))+
+  ylab("ΔMetabolites [mM]")+
+  geom_hline(yintercept = 0.01, colour="grey", linetype="dashed")+
+  ggtitle("Indoles production across individuals donor microbiota")->plot
+  #scale_y_continuous(limits = c(-0.5, 1))
+  
+
+
+plot
+
+
+
+
+ggsave(filename = "20221109_Indoles_Overview16_Donors_jz.jpeg", path = "C:/Users/zuendj/Desktop/03_data R/wp3/output", 
+       width = 31,
+       height = 25,
+       units = c("cm"))
+
+
+ggplot(subset(concentrations_long, metabolite %in% c("Tryptophan")), aes(x= Donor, y=concentration)) +
+  geom_col(width = 1, position = position_dodge(1), aes(fill = Substrate))+
+  scale_fill_manual(values=c("#F8766D", "#E68613", "#CD9600", "#ABA300", "#00C19A","#8494FF", "#00B8E7" ,"#C77Cff","#00BFC4" ,"#018571", "black", "grey"),
+  labels= c(expression(H[2]*O), 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))+
+  #stat_summary(fun = mean, geom = "bar", position = position_dodge(1), aes(fill = Donor)) +
+  #scale_fill_manual(values=c('darkgoldenrod1', "cyan4"))+
+  facet_grid(rows=vars(metabolite), col=vars(Donor), scales = "free", space = "free_x")+
+  theme(strip.placement = "outside",
+        strip.text.y = element_text( size=15),
+        strip.text.x = element_text( size=15),
+        # strip.background = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(), 
+        legend.position="bottom",
+        plot.title = element_text(size=20),
+        axis.text.y= element_text(size = 15),
+        axis.title.y= element_text(size = 20),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size=20))+
+  ylab("ΔMetabolites [mM]")+
+  geom_hline(yintercept = 0.01, colour="grey", linetype="dashed")+
+  ggtitle("Tryptophan consumption across individuals donor microbiota")->plot
+
+ggsave(filename = "tryptophan_consumpt.jpeg", path = "C:/Users/zuendj/Desktop/03_data R/wp3/output", 
+       width = 30,
+       height = 12,
+       units = c("cm"))
+
+```
+
+##for individual substrates
+```{r}
+# library(rstatix)
+
+
+concentrations_long %>%
+  group_by(metabolite) %>%
+  wilcox_test(data= .,
+  formula = concentration ~ Substrate,
+  ref.group="H2O",
+  )%>%
+  add_significance()->wil
+
+
+stat.test <- wil %>% 
+  add_y_position(fun = "max", scales = "free", step.increase = 0)
+
+
+
+
+concentrations_long%>%
+  ggplot(aes(x= Substrate, y=concentration)) +
+  # geom_point(aes(colour=Donor), position=position_jitter(0.2), alpha=0.8)+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(aes(colour=Donor), width = 0.1)+
+  # geom_col(width = 1, position = position_dodge(1), aes(fill = Donor))+
+  #stat_summary(fun = mean, geom = "bar", position = position_dodge(1), aes(fill = Donor)) +
+  #scale_fill_manual(values=c('darkgoldenrod1', "cyan4"))+
+  facet_grid(rows= vars(metabolite), scales = "free", switch = "y" )+
+  geom_hline(yintercept=0)+
+  theme(strip.placement = "outside",
+        strip.text.y = element_text( size=15),
+        strip.text.x = element_text( size=15),
+        # strip.background = element_blank(),
+        axis.text.x = element_text(size=20),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(), 
+        legend.position="bottom",
+        plot.title = element_text(size=20),
+        axis.text.y= element_text(size = 15),
+        axis.title.y= element_text(size = 20),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size=20))+
+  stat_pvalue_manual(stat.test, remove.bracket = TRUE, hide.ns = T, label = "p.adj.signif", step.increase = 0, bracket.nudge.y = bracket.nudge.y, size = 5)+
+  ylab("ΔMetabolites [mM]")+
+  geom_hline(yintercept = 0.01, colour="grey", linetype="dashed")+
+  scale_x_discrete(labels = c(expression(H[2]*O), 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))->plot
+#scale_y_continuous(limits = c(-0.5, 1))
+
+
+
+plot
+
+ggsave(filename = "20221109_Indoles_Overview16_Substrates_jz.jpeg", path = "C:/Users/zuendj/Desktop/03_data R/wp3/output", 
+       width = 31,
+       height = 25,
+       units = c("cm"))
+```
+
+```{r}
+
+  ggplot(subset(concentrations_long, metabolite %in% c("Tryptophan") ), aes(x= Substrate, y=concentration)) +
+  # geom_point(aes(colour=Donor), position=position_jitter(0.2), alpha=0.8)+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(aes(colour=Donor), width = 0.1)+
+  # geom_col(width = 1, position = position_dodge(1), aes(fill = Donor))+
+  #stat_summary(fun = mean, geom = "bar", position = position_dodge(1), aes(fill = Donor)) +
+  #scale_fill_manual(values=c('darkgoldenrod1', "cyan4"))+
+  facet_grid(rows= vars(metabolite), scales = "free", switch = "y" )+
+  geom_hline(yintercept=0)+
+  theme(strip.placement = "outside",
+        strip.text.y = element_text( size=15),
+        strip.text.x = element_text( size=15),
+        # strip.background = element_blank(),
+        axis.text.x = element_text(size=20),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(), 
+        legend.position="bottom",
+        plot.title = element_text(size=20),
+        axis.text.y= element_text(size = 15),
+        axis.title.y= element_text(size = 20),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size=20))+
+  ylab("ΔMetabolites [mM]")+
+  scale_x_discrete(labels = c(expression(H[2]*O), 'AG','PE', 'Pea', 'bGlc', 'IN', 'Muc' ,'SS' ,'XY' , 'Nut'))->plot
+#scale_y_continuous(limits = c(-0.5, 1))
+
+
+
+plot
+
+ggsave(filename = "20221109_Indoles_Overview16_Substrates_jz.jpeg", path = "C:/Users/zuendj/Desktop/03_data R/wp3/output", 
+       width = 31,
+       height = 25,
+       units = c("cm"))
+```
+
+
+
+
+
+```{r}
+
+metaboliteswide %>%
+  ggplot(aes(x=Indolelactate_mM, y=Indolepropionate_mM))+
+  geom_point(aes(x=Indolelactate_mM, y=Indolepropionate_mM,  shape=substrate, , colour=donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10))+
+  facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq()
+  
+
+
+
+```
+
+
+```{r}
+
+metaboliteswide %>%
+  ggplot(aes(x=Tryptophan_mM, y=Indole_mM))+
+  geom_point(aes(shape=substrate, colour=donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10))+
+  # facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=-1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq()
+
+metaboliteswide %>%
+  ggplot(aes(x=Tryptophan_mM, y=Indolepropionate_mM))+
+  geom_point(aes(shape=substrate, colour=donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10))+
+  # facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=-1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq()
+
+metaboliteswide %>%
+  ggplot(aes(x=Tryptophan_mM, y=Indolelactate_mM))+
+  geom_point(aes(shape=substrate, colour=donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10))+
+  # facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=-1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq()
+
+metaboliteswide %>%
+  ggplot(aes(x=Tryptophan_mM, y=Indoleacetate_mM))+
+  geom_point(aes(shape=substrate, colour=donor))+
+  scale_shape_manual(values=c(0,1,2,3,4,5,6,7,8,9,10))+
+  # facet_grid(cols=vars(substrate), scales="free")+
+  geom_abline(slope=-1, lty=2, lwd=1, colour="grey")+
+  stat_poly_line(colour="darkgrey")+
+  stat_poly_eq()
+```
+
+
+
